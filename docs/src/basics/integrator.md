@@ -87,6 +87,8 @@ and then `solve!` is equivalent to `solve`.
 SciMLBase.step!
 SciMLBase.check_error
 SciMLBase.check_error!
+SciMLBase.ReturnCode
+SciMLBase.reeval_internals_due_to_modification!
 ```
 
 ## Handling Integrators

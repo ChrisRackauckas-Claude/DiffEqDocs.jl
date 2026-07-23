@@ -4,6 +4,7 @@
 SciMLBase.BVProblem
 SciMLBase.SecondOrderBVProblem
 SciMLBase.BVPFunction
+SciMLBase.problem_type
 ```
 
 ## Solution Type

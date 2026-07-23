@@ -29,6 +29,7 @@ DiffEqBase.NoInit
 DiffEqBase.OverrideInit
 DiffEqBase.BrownFullBasicInit
 DiffEqBase.ShampineCollocationInit
+SciMLBase.OverrideInitData
 ```
 
 ## ⚠️ WARNING: NoInit Usage

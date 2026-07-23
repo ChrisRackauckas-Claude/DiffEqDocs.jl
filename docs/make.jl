@@ -48,6 +48,24 @@ if isdir(ordinartdiffeq_docs_path)
     # OrdinaryDiffEq's developer docs are contributor-internal and their @eval blocks
     # read paths relative to OrdinaryDiffEq's own build layout, so they cannot build
     # inside DiffEqDocs; drop them from the user-facing site.
+    # Bare `@ref Developer-Extension-API` links in the copied API pages target the
+    # deleted developer docs; rewrite them to the published OrdinaryDiffEq page so
+    # Documenter cross-references stay resolvable here (see SciML/DiffEqDocs.jl#879).
+    for (root, _, files) in walkdir(ordinary_diffeq_dest)
+        for file in files
+            endswith(file, ".md") || continue
+            path = joinpath(root, file)
+            text = read(path, String)
+            new_text = replace(
+                text,
+                r"\[([^\]]*)\]\(@ref Developer-Extension-API\)" =>
+                    s"[\1](https://docs.sciml.ai/OrdinaryDiffEq/stable/devtools/internals/public_api/)",
+            )
+            if new_text != text
+                write(path, new_text)
+            end
+        end
+    end
     rm(joinpath(ordinary_diffeq_dest, "devtools"), recursive = true, force = true)
 
     # Copy the pages.jl file from OrdinaryDiffEq.jl
