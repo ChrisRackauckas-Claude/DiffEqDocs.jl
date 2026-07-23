@@ -107,7 +107,7 @@ such as `Tsit5()`, `Vern7()`, etc., and thus those methods are not appropriate
 for this kind of problem. You will want to change to a different method, like
 `Rodas5()`, `Rosenbrock23()`, `TRBDF2()`, `KenCarp4()`, or `QNDF()`.
 
-#### My ODE goes negative but should stay positive, what tools can help?
+#### [My ODE goes negative but should stay positive, what tools can help?](@id faq_positivity)
 
 There are many tools to help! However, let's first focus on one piece first:
 when you say “should” be positive, what do you mean by “should”? If you mean
@@ -133,8 +133,11 @@ With that in mind, let's see the options.
 
 The simplest trick is to change the solver tolerance. Reduce `abstol` (and maybe
 `reltol`) a bit. That can help reduce the error and thus keep the solution positive.
-For some more difficult equations, changing to a stiff ODE solver like `Rosenbrock23()`
-`QNDF`, or `TRBDF2()` can be helpful.
+For some equations that helps; for others, especially near a simplex boundary with
+an attracting heteroclinic cycle, a stiff method can *overshoot* more easily than
+an explicit one. See [the exterior-equilibrium FAQ entry](@ref faq_exterior_eq)
+for that failure mode. Trying `Rosenbrock23()`, `QNDF()`, or `TRBDF2()` is still
+reasonable, but do not assume “stiffer = more positive.”
 
 If those don't work, call out the big guns. One of them is `isoutofdomain`, where
 you can define a boolean function which will cause step rejections whenever it
@@ -176,6 +179,111 @@ you may want to write your model to be robust to this behavior, such as changing
 values, like solving for `u^2` or `exp(u)` instead of `u`, which mathematically
 can only be positive. Look into using a tool like [ModelingToolkit.jl](https://docs.sciml.ai/ModelingToolkit/stable/)
 for automatically transforming your equations.
+
+#### [My stiff / Auto solver finds a wrong long-time equilibrium (ecology, chemistry, populations)](@id faq_exterior_eq)
+
+A common report looks like this: `Tsit5()` or `Vern9()` gives the expected
+long-time behavior (oscillations on a simplex, approach to a physical steady
+state, conserved mass, …), but `Rodas5P()`, `FBDF()`, `AutoTsit5(Rodas5P())`,
+or the default composite algorithm “goes wrong” — wrong amplitude, wrong period,
+or a steady state with a **negative population / concentration**. People often
+blame the Auto switcher first. That is usually secondary.
+
+**What is actually going wrong**
+
+1. Many ecological and chemical ODEs are written so that the **non-negative
+   orthant** (or a simplex ``\{u_i \ge 0, \sum u_i = 1\}``) is invariant for the
+   *exact* flow. The unconstrained RHS ``f`` may still have **additional zeros
+   outside that domain** — fixed points with some ``u_i < 0``.
+2. Adaptive solvers only control local truncation error. They do **not** enforce
+   positivity by default (and should not: plenty of legitimate models need
+   negative state). Near a boundary, a step can undershoot ``u_i = 0`` by a tiny
+   amount.
+3. Once a component is negative, the true continuous dynamics of that RHS may
+   **attract to an exterior equilibrium**. The solver then reports `Success` at
+   a mathematically valid root of ``f(u)=0`` that is **not** the biologically
+   intended attractor. This is especially easy to hit on May–Leonard /
+   rock–paper–scissors competition models and other systems with a heteroclinic
+   cycle that drives some components toward ``0`` (often to values like
+   ``10^{-100}``).
+4. High-order / stiff implicit methods (`Rodas5P`, `FBDF`, …) can take steps that
+   leave the simplex more readily than some explicit RK methods (`Tsit5`,
+   `Vern9`), which is why “explicit works, stiff/Auto fails” is a common
+   symptom. Auto algorithms that spend time on the stiff side inherit the same
+   domain issue; changing Auto thresholds does **not** fix bare `Rodas5P()` /
+   `FBDF()` on the same problem.
+
+**Minimal May–Leonard-style example**
+
+```julia
+using OrdinaryDiffEq
+
+function fweb!(dN, N, p, t)
+    α, β = 0.8, 1.3
+    dN[1] = N[1] * (1 - N[1] - α * N[2] - β * N[3])
+    dN[2] = N[2] * (1 - β * N[1] - N[2] - α * N[3])
+    dN[3] = N[3] * (1 - α * N[1] - β * N[2] - N[3])
+    return nothing
+end
+
+prob = ODEProblem(fweb!, [0.6, 0.6, 0.1], (0.0, 3000.0))
+
+sol_ok = solve(prob, Tsit5())
+# sol_ok.u[end] ≈ simplex vertex, sum ≈ 1, all components ≥ 0
+
+sol_bad = solve(prob, Rodas5P())
+# sol_bad.u[end] can be something like [7.5, 0, -5] (sum = 2.5): an exterior
+# equilibrium of f (f(u) = 0), not a numerical blow-up.
+
+# Recovery: reject steps that leave the physical domain
+sol_fixed = solve(prob, Rodas5P();
+                  isoutofdomain = (u, p, t) -> any(<(0), u))
+# sol_fixed.u[end] stays on the simplex (e.g. a vertex), retcode Success
+```
+
+You can check the exterior point yourself: for this RHS,
+`f([7.5, 0, -5]) == 0` (and cyclic permutations), so the solver is not
+“inventing” a fixed point — it is integrating the **unconstrained** ODE
+correctly after leaving the domain you cared about.
+
+**Recommended fixes (model / solve options, not silent solver defaults)**
+
+  - Prefer an explicit domain constraint when the model is only valid for
+    ``u_i \ge 0``:
+
+    ```julia
+    solve(prob, alg; isoutofdomain = (u, p, t) -> any(<(0), u))
+    ```
+
+    For a simplex, also reject mass drift if that is part of the invariant, e.g.
+    `any(<(0), u) || abs(sum(u) - 1) > tol`.
+  - Use the [positivity / domain-handling callbacks](@ref callback_library) when
+    you want progress via interpolation rather than pure step rejection (see
+    also [the general positivity FAQ](@ref faq_positivity)).
+  - Harden the RHS for tiny negatives when only continuous evaluation matters
+    (`sqrt(max(u,0))`, etc.), and/or reformulate (log-transform, projective
+    coordinates) with ModelingToolkit when appropriate.
+  - Tighten `abstol`/`reltol` if you only see *tiny* negatives and no exterior
+    lock-in; that is often enough for mild cases but is **not** a substitute for
+    a domain constraint on heteroclinic / near-extinction dynamics.
+  - Do **not** expect Auto switching heuristics alone to “fix” this, and do **not**
+    expect the library to turn on positivity by default for all ODE solves —
+    that would break models that legitimately use negative state.
+
+**How to tell this failure mode apart from a true solver bug**
+
+  - `sol.retcode` is often `Success` even when the answer is physically wrong.
+  - Evaluate `f(sol.u[end], p, t)`: if it is ~0 and some components are negative,
+    you hit an exterior equilibrium of the unconstrained RHS.
+  - Compare `Tsit5()` / `Vern9()` vs `Rodas5P()` / `FBDF()` **with the same**
+    `isoutofdomain`. If the domain guard makes stiff methods match the
+    non-stiff long-time behavior, the issue was domain handling, not the Auto
+    heuristic and not a broken tableau.
+  - If *every* method (including low-order explicit, tiny tolerances, and
+    domain guards) still leaves the domain, revisit the model: the continuous
+    problem may not actually preserve positivity.
+
+Related discussion: [OrdinaryDiffEq.jl#703](https://github.com/SciML/OrdinaryDiffEq.jl/issues/703).
 
 ### I'm trying to solve DAEs but my solver is unstable and/or slow, what's wrong with IDA and DFBDF?
 
