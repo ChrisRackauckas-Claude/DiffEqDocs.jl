@@ -815,7 +815,11 @@ Sundials CVODE integrator.
   - `OrdinaryDiffEqBDF.QBDF1` - An adaptive order 1 L-stable BDF method. This is equivalent to
     implicit Euler but using the BDF error estimator.
   - `OrdinaryDiffEqBDF.ABDF2` - An adaptive order 2 L-stable fixed leading coefficient multistep
-    BDF method.
+    BDF method. Fixed order-2 local-error control: global ``\mathrm{err}/\mathrm{tol}``
+    can grow like ``\mathrm{tol}^{-1/3}`` as tolerances tighten (see
+    [the FAQ](@ref faq_dabdf2_error_control) and
+    [OrdinaryDiffEq.jl#1256](https://github.com/SciML/OrdinaryDiffEq.jl/issues/1256)).
+    Prefer `FBDF` or `QNDF` when global error should track `tol` more tightly.
   - `OrdinaryDiffEqBDF.QNDF2` - An adaptive order 2 quasi-constant timestep L-stable numerical
     differentiation function (NDF) method.
   - `OrdinaryDiffEqBDF.QBDF2` - An adaptive order 2 L-stable BDF method using quasi-constant timesteps.

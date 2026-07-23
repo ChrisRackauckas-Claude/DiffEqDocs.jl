@@ -406,6 +406,30 @@ is 1-2 digits less than the relative tolerances. Thus, for the defaults
 digits. This is standard across the board and applies to the native Julia methods,
 the wrapped Fortran and C++ methods, the calls to MATLAB/Python/R, etc.
 
+#### [Why does adaptive `DABDF2` / `ABDF2` give global error much larger than `tol`?](@id faq_dabdf2_error_control)
+
+`DABDF2` (fully implicit DAEs) and its ODE twin `ABDF2` are **fixed order-2**
+methods that adapt the timestep using a **local** order-2 error estimate. Local
+tolerances are not global guarantees (see the previous FAQ entry). For fixed-order
+local-error control of order ``p = 2``, standard theory gives:
+
+  - stepsize ``h \sim \mathrm{tol}^{1/(p+1)} = \mathrm{tol}^{1/3}``
+  - global error ``O(h^p) \sim \mathrm{tol}^{p/(p+1)} = \mathrm{tol}^{2/3}``
+  - so ``\mathrm{global\ error}/\mathrm{tol} \sim \mathrm{tol}^{-1/3}``
+
+Absolute error still decreases as you tighten `abstol`/`reltol`, but the ratio
+of global error to tolerance can grow by about a factor of ``100^{1/3} \approx 4.6``
+each time the tolerance is tightened by ``100\times``. That growth is expected for
+order-2 local control; it is not evidence of a broken error estimator.
+
+If you need global error that tracks the requested tolerances more tightly:
+
+  - for fully implicit DAEs (`DAEProblem`), prefer `DFBDF` (variable-order adaptive BDF)
+  - for ODEs, prefer higher-order multistep methods such as `FBDF` or `QNDF`
+
+See [SciML/OrdinaryDiffEq.jl#1256](https://github.com/SciML/OrdinaryDiffEq.jl/issues/1256)
+for measurements and discussion.
+
 #### The solver doesn't obey physical law X (e.g. conservation of energy)
 
 Yes, this is because the numerical solution of the ODE is not the exact solution.

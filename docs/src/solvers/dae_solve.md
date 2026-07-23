@@ -64,6 +64,11 @@ These methods from OrdinaryDiffEq are for `DAEProblem` specifications.
 
   - `OrdinaryDiffEqBDF.DImplicitEuler` - 1st order A-L and stiffly stable adaptive implicit Euler
   - `OrdinaryDiffEqBDF.DABDF2` - 2nd order A-L stable adaptive BDF method.
+    Fixed order-2 local-error control: global ``\mathrm{err}/\mathrm{tol}`` can grow
+    like ``\mathrm{tol}^{-1/3}`` as tolerances tighten (see
+    [the FAQ](@ref faq_dabdf2_error_control) and
+    [OrdinaryDiffEq.jl#1256](https://github.com/SciML/OrdinaryDiffEq.jl/issues/1256)).
+    Prefer `DFBDF` when global error should track `tol` more tightly.
   - `OrdinaryDiffEqBDF.DFBDF` - A fixed-leading coefficient adaptive-order adaptive-time BDF method,
     similar to `ode15i` or `IDA` in divided differences form.
 
