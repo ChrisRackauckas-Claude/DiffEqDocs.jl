@@ -554,6 +554,62 @@ prob = DE.ODEProblem(foo, ones(5, 5), (0.0, 1.0),
 DE.solve(prob, ODE.TRBDF2())
 ```
 
+#### My RHS is implemented in C/Fortran via `ccall` and stiff solvers give wrong Jacobians
+
+Stiff solvers (Rosenbrock, SDIRK, Radau, BDF, …) default to building Jacobians with
+[ForwardDiff.jl](https://juliadiff.org/ForwardDiff.jl/stable/). That packages the
+state in `ForwardDiff.Dual` numbers and re-evaluates the RHS. Julia code that is
+generic in the element type (or uses `PreallocationTools.dualcache`) differentiates
+correctly. **Foreign code called through `ccall` does not.**
+
+A `Vector{Dual}` is still a bitstype array, so a signature such as
+
+```julia
+f!(du, u, p, t) = ccall((:rhs, "lib.so"), Cvoid,
+    (Ptr{Cdouble}, Ptr{Cdouble}, Cdouble), du, u, t)
+```
+
+**silently reinterprets Dual memory as `Cdouble`**. There is no conversion error
+at the `ccall` boundary — Julia cannot detect that the C function is reading the
+wrong layout — so the Jacobian is garbage and the solve may fail or (worse)
+return a plausible but incorrect trajectory. This is the failure mode behind
+[DifferentialEquations.jl#888](https://github.com/SciML/DifferentialEquations.jl/issues/888).
+
+What to do:
+
+1. **Prefer finite differences for foreign RHS.** Pass an `ADTypes` finite-diff
+   backend to any autodiff-using algorithm:
+
+   ```julia
+   import ADTypes
+   solve(prob, RadauIIA5(autodiff = ADTypes.AutoFiniteDiff()))
+   # or Rosenbrock23(autodiff = ADTypes.AutoFiniteDiff()), etc.
+   ```
+
+2. **Or supply an analytical Jacobian** via `ODEFunction(..., jac = ...)` (also
+   implemented in C if desired) so the solver never needs to autodiff the RHS.
+
+3. **Or wrap the RHS so Dual never reaches `ccall`.** Reject non-`AbstractFloat`
+   eltypes before calling C:
+
+   ```julia
+   function f!(du, u, p, t)
+       eltype(u) <: AbstractFloat ||
+           error("C RHS cannot accept eltype $(eltype(u)); use autodiff=AutoFiniteDiff() or provide jac")
+       ccall((:rhs, "lib.so"), Cvoid, (Ptr{Cdouble}, Ptr{Cdouble}, Cdouble), du, u, t)
+       nothing
+   end
+   ```
+
+   With that guard, ForwardDiff-style autodiff fails loudly instead of
+   reinterpreting memory. You can also use
+   `ODEProblem{iip, FunctionWrapperSpecialize}(...)` so Dual calls must match a
+   compiled wrapper signature and miss with `NoFunctionWrapperFoundError`.
+
+4. Do **not** expect Julia to “auto-detect” that a `ccall` is not differentiable.
+   Detection is not possible at the C ABI; the options above are the supported
+   workarounds.
+
 ## Sparse Jacobians
 
 #### I get errors when I try to solve my problem using sparse Jacobians
